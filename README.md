@@ -1,4 +1,4 @@
-# Queue-Simulation
+# Queue Simulation
 
 Multithreaded real-time queue simulation in C++.
 
