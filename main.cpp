@@ -1,6 +1,7 @@
 
 // General
 #include <cstdio>
+#include <cmath>
 #include <ctime>
 #include <functional>
 #include <thread>
@@ -9,10 +10,10 @@
 #include <vector>
 
 // Streams
+#include <iomanip>
 #include <iostream>
 
 // Local
-#include "customer.hpp"
 #include "queue.hpp"
 #include "utility.hpp"
 
@@ -22,49 +23,58 @@
  * All times are given in SECONDS and represented by a `double`.
  */
 
+unsigned int minutes { 0 };
+
 std::mutex mtx;
 
-void serve(Queue& q)
+void serve(QueueEnvironment& env)
 {
 /*
  * Serve customers in the queue.
- *
- * @arg q   A queue of customers
- *
  */
     for (;;) {
-        if (q.serve()) {
-            mtx.lock();
-            std::cout
-                << "(" << q.size() << ") Customer served in queue " << q.num()
-                << "." << std::endl;
-            mtx.unlock();
+        mtx.lock();
+        if (minutes == time_limit) { mtx.unlock(); break; }
+        if (env.q.serve()) {
+//            std::cout
+//                << "(" << env.q.size() << ") Customer served in queue "
+//                << env.q.num()
+//                << "." << std::endl;
         }
+        mtx.unlock();
     }
+    std::cout << "Exiting serve." << std::endl;
 }
 
-void arrive(Queue& q, const double lambda, const double mu, const double sigma)
+void arrive(QueueEnvironment& env)
 /*
  * Let customers arrive to the queue. The arrival is modeled after a Poisson
  * process.
- *
- * @arg q       A queue of customers
- * @arg lambda  Argument to invpoiss
- * @arg mu      Argument to gauss (mean)
- * @arg sigma   Argument to gauss (standard deviation)
  */
 {
     for (;;) {
-        sleep(60.0 * invpoiss(lambda));
-        q.arrive(Customer(gauss(mu, sigma)));
         mtx.lock();
-        std::cout
-            << "(" << q.size() << ") Customer arrived to queue " << q.num()
-            << "." << std::endl;
+        if (minutes == time_limit) { mtx.unlock(); break; }
+        mtx.unlock();
+        sleep(60.0 * invpoiss(env.dist.lambda));
+        Customer c { gauss(env.dist.mu, env.dist.sigma) };
+        mtx.lock();
+        env.q.arrive(c);
+        unsigned int wt = round(env.q.wait_time());
+        if (wt < env.hist.size()) {
+            ++env.hist[wt];
+        }
+//        std::cout
+//            << "(" << q.size() << ") Customer arrived to queue " << q.num()
+//            << ". Wait time: " << std::setw(5) << q.wait_time() << " seconds."
+//            << " Number of items: " << std::setw(5) << c.num_items() << "."
+//            << std::endl;
         mtx.unlock();
     }
+    std::cout << "Exiting arrive." << std::endl;
 }
 
+#if 0
 void print(const Queue& q)
 /*
  * Print a queue on one line, reversing it with \r each iteraton.
@@ -80,113 +90,120 @@ void print(const Queue& q)
         std::cout << "\r" << q.to_string();
     }
 }
+#endif
 
 void timer_minutes()
 {
+    mtx.lock();
     std::cout << "Timer started." << std::endl;
-    for (auto minutes = 1; true; ++minutes) {
+    minutes = 1;
+    mtx.unlock();
+    for (;;) {
         sleep(60);
-        std::cout << minutes << " minutes passed." << std::endl;
+        mtx.lock();
+//        std::cout << minutes << " minutes passed." << std::endl;
+        if (minutes == time_limit) { mtx.unlock(); break; }
+        else { ++minutes; }
+        mtx.unlock();
     }
+    std::cout << "Exiting timer_minutes." << std::endl;
 }
 
-void run_queue(unsigned int num)
+void run_queue(QueueEnvironment& env)
 {
-    const double lambda { 2.0 };    // λ
-    const double mu     { 10.0 };   // μ
-    const double sigma  { 4.0 };    // σ
-
-    Queue q { num };
-
     // Thread for serving customers
-    std::thread thread_serve {serve, std::ref(q)};
+    std::thread thread_serve { serve, std::ref(env) };
 
     // Thread for customers arriving
-    std::thread thread_arrive(arrive, std::ref(q), lambda, mu, sigma);
+    std::thread thread_arrive(arrive, std::ref(env));
 
     // Thread for printing the queue to the terminal
-//    std::thread thread_print(print, std::ref(q));
+//  std::thread thread_print(print, std::ref(q));
 
     // Join threads; however, they run indefinitely so this won't really happen.
     thread_serve  .join();
     thread_arrive .join();
-//    thread_print  .join();
+//  thread_print  .join();
 }
 
-void test_hist();
-void test_poiss();
+void print_histogram(const QueueEnvironment& env)
+{
+    mtx.lock();
+    std::cout << std::string(80, '-') << std::endl;
+    std::cout << "Histogram of queue " << env.q.num() << ":\n" << std::endl;
+    for (size_t i = 0; i < env.hist.size(); ++i) {
+        std::cout
+            << i << ": " << ((i < 100) ? " " : "") << ((i < 10) ? " " : "")
+            << std::string(env.hist[i] / 50, '*')
+            << std::endl;
+    }
+    std::cout << std::string(80, '-') << "\n\n" << std::endl;
+    mtx.unlock();
+}
+
+template <typename T>
+T read_value(std::function<bool(T)> pred, const std::string& msg)
+{
+    T value;
+    bool retry;
+    do {
+        std::cin >> value;
+        retry = !pred(value) || std::cin.fail();
+        if (retry) {
+            std::cin.clear();
+            std::cin.ignore(256,'\n');
+            std::cout << msg << std::endl;
+        }
+    } while (retry);
+    return value;
+}
 
 int main()
 {
     std::cout << "\n  ~~~~ Queueing simulation ~~~~\n" << std::endl;
 
+    auto is_positive = [](size_t n){ return n >= 1; };
+
     std::cout << "How many queues?" << std::endl;
+    auto num_queues = read_value<size_t>(is_positive,
+                                         "Invalid number of queues.");
 
-    unsigned long num_queues;
-    bool retry;
-    do {
-        std::cin >> num_queues;
-        retry = num_queues < 1 || std::cin.fail();
-        if (retry) {
-            std::cin.clear();
-            std::cin.ignore(256,'\n');
-            std::cout << "Invalid number of queues." << std::endl;
-        }
-    } while (retry);
+    std::cout << "How large histogram?" << std::endl;
+    auto hist_size  = read_value<size_t>(is_positive,
+                                         "Invalid histogram size.");
 
-    auto t = time(0);
-    srand(t);
-    std::cout << "srand initialized to " << t << "." << std::endl;
+    // Set seed for the rand() function used to generate distributions
+    srand(time(0));
 
-
-//    test_hist();
-//    test_poiss();
+    // ...
+    std::vector<QueueEnvironment> envs;
+    envs.reserve(num_queues);
 
     // Thread for keeping track of how many minutes has passed
     std::thread thread_timer(timer_minutes);
 
+    // Initialize and add all threads to a vector
     std::vector<std::thread> threads;
-
-    for (unsigned long i = 0; i < num_queues; ++i) {
-        threads.push_back(std::thread(run_queue, i + 1));
+    for (size_t i = 0; i < num_queues; ++i) {
+        envs.push_back(QueueEnvironment { i + 1 });
+        envs[i].hist        = std::vector<unsigned int>(hist_size);
+        // TODO: Set different variables...
+        envs[i].dist.lambda = 4.0;  // λ - for Poisson
+        envs[i].dist.mu     = 10.0; // μ - for Gaussian
+        envs[i].dist.sigma  = 5.0;  // σ - for Gaussian
+        threads.push_back(std::thread(run_queue, std::ref(envs[i])));
     }
 
+    for (auto& t : threads) {
+        t.join();
+    }
     thread_timer.join();
 
-    for (unsigned long i = 0; i < threads.size(); ++i) {
-        threads[i].join();
-    }
-}
+    std::cout << "size = " << envs.size() << std::endl;
 
-void test_hist()
-{
-    std::vector<int> hist (45 + 1);
-
-    int nrolls = 100000;
-
-    for (int i = 0; i < nrolls; ++i) {
-        unsigned int x = 60 * invpoiss(4.0);
-        if (x < hist.size()) {
-            ++hist[x];
-        }
-    }
-
-    for (size_t i = 0; i < hist.size(); ++i) {
-        std::cout
-            << i << ": " << ((i < 10) ? " " : "")
-            << std::string(hist[i] / 500, '*')
-            << std::endl;
-    }
-}
-
-void test_poiss()
-{
-//    std::cout << "Break test with 'x'." << std::endl;
-    for (int i = 0; i < 50; ++i) {
-        std::cout << 60 * invpoiss(4.0) << std::endl;
-//        if (getchar() == 'x') {
-//            break;
-//        }
+    // Show the result(s)
+    for (const auto& env : envs) {
+        print_histogram(env);
     }
 }
 
