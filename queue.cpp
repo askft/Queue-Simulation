@@ -7,7 +7,7 @@
 void
 Queue::arrive(const Customer& c)
 {
-    self_.push_back(std::move(c));
+    self_.push_back(c);
 }
 
 bool
@@ -38,7 +38,9 @@ std::string
 Queue::to_string() const
 {
     std::string s {""};
-    for (unsigned long i = 0; i < self_.size(); ++i) { s += "<"; }
+    for (unsigned long i = 0; i < self_.size(); ++i) {
+        s += "<";
+    }
     return s;
 }
 

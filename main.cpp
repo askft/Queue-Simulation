@@ -35,13 +35,15 @@ void serve(QueueEnvironment& env)
     for (;;) {
         mtx.lock();
         if (minutes == time_limit) { mtx.unlock(); break; }
-        if (env.q.serve()) {
-//            std::cout
-//                << "(" << env.q.size() << ") Customer served in queue "
-//                << env.q.num()
-//                << "." << std::endl;
-        }
         mtx.unlock();
+        if (env.q.serve()) {
+//            mtx.lock();
+//            std::cout
+//                << "(" << env.q.size() << ") "
+//                << "Customer served in queue " << env.q.num() << "."
+//                << std::endl;
+//            mtx.unlock();
+        }
     }
     std::cout << "Exiting serve." << std::endl;
 }
@@ -57,16 +59,17 @@ void arrive(QueueEnvironment& env)
         if (minutes == time_limit) { mtx.unlock(); break; }
         mtx.unlock();
         sleep(60.0 * invpoiss(env.dist.lambda));
-        Customer c { gauss(env.dist.mu, env.dist.sigma) };
         mtx.lock();
+        Customer c { gauss(env.dist.mu, env.dist.sigma) };
         env.q.arrive(c);
         unsigned int wt = round(env.q.wait_time());
         if (wt < env.hist.size()) {
             ++env.hist[wt];
         }
 //        std::cout
-//            << "(" << q.size() << ") Customer arrived to queue " << q.num()
-//            << ". Wait time: " << std::setw(5) << q.wait_time() << " seconds."
+//            << "(" << env.q.size() << ") "
+//            << "Customer arrived to queue " << env.q.num() << ". "
+//            << "Wait time: " << std::setw(5) << env.q.wait_time() << " seconds."
 //            << " Number of items: " << std::setw(5) << c.num_items() << "."
 //            << std::endl;
         mtx.unlock();
@@ -101,7 +104,7 @@ void timer_minutes()
     for (;;) {
         sleep(60);
         mtx.lock();
-//        std::cout << minutes << " minutes passed." << std::endl;
+        std::cout << minutes << " minutes passed." << std::endl;
         if (minutes == time_limit) { mtx.unlock(); break; }
         else { ++minutes; }
         mtx.unlock();
@@ -190,7 +193,7 @@ int main()
         // TODO: Set different variables...
         envs[i].dist.lambda = 4.0;  // λ - for Poisson
         envs[i].dist.mu     = 10.0; // μ - for Gaussian
-        envs[i].dist.sigma  = 5.0;  // σ - for Gaussian
+        envs[i].dist.sigma  = 6.0;  // σ - for Gaussian
         threads.push_back(std::thread(run_queue, std::ref(envs[i])));
     }
 
